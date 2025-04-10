@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  api:
+    build: .
+    environment:
+      - APP_TYPE=api
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    command: python run_production.py
+
+  web:
+    build: .
+    environment:
+      - APP_TYPE=streamlit
+      - PORT=8501
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./:/app
+    command: python run_production.py
+    depends_on:
+      - api 
