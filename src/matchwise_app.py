@@ -1131,7 +1131,18 @@ def main():
     st.markdown("# Matchwise - {0}".format(st.session_state.page.title()))
     
     # Sidebar for navigation
-    st.sidebar.title("Matchwise")
+    # Instead of showing logo separately, we'll combine it with the title
+    st.sidebar.markdown("""
+    <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+        <h1 style="margin: 0; padding: 0;">Matchwise</h1>
+        <div style="margin-left: 10px;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="24" height="24" rx="12" fill="#1E88E5" />
+                <path d="M7 12L10 15L17 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.sidebar.caption("AI-Powered Job Screening")
     
     st.sidebar.markdown("---")
