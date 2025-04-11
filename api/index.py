@@ -15,4 +15,4 @@ os.environ["APP_TYPE"] = "api"
 from src.main import app
 
 # Vercel uses the 'app' object directly
-# This is a standard ASGI application 
+# This is a standard ASGI application

@@ -14,6 +14,8 @@
   ],
   "env": {
     "APP_TYPE": "api",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    "VERCEL": "1",
+    "SECRET_KEY": "81e1f65b0ff5a5cdb3bed555f5383fe39d68c5abf880c1456a74d4b87525e8d8"
   }
-} 
+}
