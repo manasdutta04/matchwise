@@ -615,104 +615,175 @@ def load_candidates():
         conn.close()
         return candidates
     
-    # If no candidates in DB, load from PDFs and process
+    # If no candidates in DB, generate sample candidates
     try:
         cv_folder = "AI-Powered Job Application Screening System/CVs1"
-        if os.path.exists(cv_folder):
-            st.success(f"Found CV folder: {cv_folder}")
-            candidates = []
-            cv_files = glob.glob(f"{cv_folder}/*.pdf")
-            
-            if not cv_files:
-                st.warning(f"No PDF files found in {cv_folder}. Checking subdirectories...")
-                # Try looking in subdirectories
-                cv_files = glob.glob(f"{cv_folder}/**/*.pdf", recursive=True)
-            
-            if not cv_files:
-                st.error(f"No PDF files found in {cv_folder} or its subdirectories")
-                conn.close()
-                return []
-            
-            st.success(f"Found {len(cv_files)} CV files")
-            
-            # Create a progress bar
-            progress = st.progress(0)
-            
-            for i, cv_file in enumerate(cv_files):
-                # Extract filename
-                filename = os.path.basename(cv_file)
+        cv_files = []
+        
+        # Check for CV files in various possible locations
+        possible_folders = [
+            "AI-Powered Job Application Screening System/CVs1",
+            "AI-Powered Job Application Screening System/CVs",
+            "AI-Powered Job Application Screening System/CV",
+            "AI-Powered Job Application Screening System/Resumes",
+            "CVs1",
+            "CVs",
+            "resumes"
+        ]
+        
+        for folder in possible_folders:
+            if os.path.exists(folder):
+                st.success(f"Found CV folder: {folder}")
+                cv_files = glob.glob(f"{folder}/*.pdf")
                 
-                # Process through agent to extract skills, experience, education
-                cv_data = cv_agent.process_cv(filename, cv_file)
+                if cv_files:
+                    cv_folder = folder
+                    break
+                else:
+                    # Try looking in subdirectories
+                    cv_files = glob.glob(f"{folder}/**/*.pdf", recursive=True)
+                    if cv_files:
+                        cv_folder = folder
+                        break
+        
+        # If no PDF files found, generate synthetic data
+        if not cv_files:
+            st.warning("No CV files found. Generating synthetic candidate data...")
+            
+            # Generate synthetic candidates
+            candidates = []
+            for i in range(1, 11):  # Generate 10 candidates
+                candidate_id = f"C{8000 + i}"
+                
+                # Generate data with some randomness
+                skills_list = ["Python", "Java", "JavaScript", "React", "Docker", "AWS", "Azure", 
+                              "Communication", "Team Leadership", "Problem Solving", "SQL", 
+                              "Machine Learning", "Data Analysis", "DevOps", "UI/UX Design"]
+                
+                # Select random skills
+                num_skills = random.randint(4, 8)
+                skills = random.sample(skills_list, num_skills)
+                
+                # Generate education
+                education = [
+                    {
+                        "degree": random.choice(["Bachelor's in Computer Science", "Master's in IT", 
+                                               "Bachelor's in Engineering", "Master's in Data Science"]),
+                        "university": f"University of {chr(65 + random.randint(0, 25))}{chr(65 + random.randint(0, 25))}",
+                        "year": 2015 + random.randint(0, 7)
+                    }
+                ]
+                
+                # Generate experience
+                experience = [
+                    {
+                        "title": random.choice(["Software Engineer", "Web Developer", "Data Scientist", 
+                                              "Project Manager", "DevOps Engineer"]),
+                        "company": f"Tech Company {chr(65 + random.randint(0, 25))}",
+                        "duration": f"{1 + random.randint(1, 4)} years"
+                    }
+                ]
+                
+                # Create candidate
+                candidate = {
+                    "id": i,
+                    "name": f"Candidate {candidate_id}",
+                    "cv_filename": f"{candidate_id}.pdf",
+                    "cv_path": "",  # No actual path
+                    "skills": skills,
+                    "experience": experience,
+                    "education": education
+                }
                 
                 # Save to database
-                candidate_id = cv_agent.save_to_db(cv_data)
-                
-                # Add ID to candidate data
-                cv_data["id"] = candidate_id
-                candidates.append(cv_data)
-                
-                # Update progress
-                progress.progress((i + 1) / len(cv_files))
+                cursor.execute("""
+                INSERT INTO candidates (name, cv_filename, cv_path, skills, experience, education)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    candidate["name"],
+                    candidate["cv_filename"],
+                    candidate["cv_path"],
+                    json.dumps(candidate["skills"]),
+                    json.dumps(candidate["experience"]),
+                    json.dumps(candidate["education"])
+                ))
+                candidate["id"] = cursor.lastrowid
+                candidates.append(candidate)
             
-            # Remove progress bar
-            progress.empty()
-            
+            conn.commit()
             conn.close()
-            st.success(f"Processed and loaded {len(candidates)} candidates")
             return candidates
-        else:
-            # Try alternative paths
-            alt_paths = [
-                "AI-Powered Job Application Screening System/CVs",
-                "AI-Powered Job Application Screening System/CV",
-                "AI-Powered Job Application Screening System/Resumes",
-                "CVs1",
-                "CVs"
-            ]
+        
+        # If we found PDF files, process them
+        st.success(f"Found {len(cv_files)} CV files")
+        
+        # Create a progress bar
+        progress = st.progress(0)
+        
+        # Process the CV files
+        candidates = []
+        for i, cv_file in enumerate(cv_files):
+            # Extract filename
+            filename = os.path.basename(cv_file)
             
-            for path in alt_paths:
-                if os.path.exists(path):
-                    st.success(f"Found alternative CV folder: {path}")
-                    cv_files = glob.glob(f"{path}/*.pdf")
-                    
-                    if cv_files:
-                        candidates = []
-                        progress = st.progress(0)
-                        
-                        for i, cv_file in enumerate(cv_files):
-                            filename = os.path.basename(cv_file)
-                            
-                            # Process through agent
-                            cv_data = cv_agent.process_cv(filename, cv_file)
-                            
-                            # Save to database
-                            candidate_id = cv_agent.save_to_db(cv_data)
-                            
-                            # Add ID to candidate data
-                            cv_data["id"] = candidate_id
-                            candidates.append(cv_data)
-                            
-                            # Update progress
-                            progress.progress((i + 1) / len(cv_files))
-                        
-                        # Remove progress bar
-                        progress.empty()
-                        
-                        conn.close()
-                        st.success(f"Processed and loaded {len(candidates)} candidates from alternative path")
-                        return candidates
+            # Process through agent to extract skills, experience, education
+            cv_data = cv_agent.process_cv(filename, cv_file)
             
-            # If we get here, we couldn't find any CVs in any location
-            st.error(f"CV folder not found in any expected locations")
-            conn.close()
-            return []
+            # Save to database
+            candidate_id = cv_agent.save_to_db(cv_data)
+            
+            # Add ID to candidate data
+            cv_data["id"] = candidate_id
+            candidates.append(cv_data)
+            
+            # Update progress
+            progress.progress((i + 1) / len(cv_files))
+        
+        # Remove progress bar
+        progress.empty()
+        
+        conn.close()
+        st.success(f"Processed and loaded {len(candidates)} candidates")
+        return candidates
             
     except Exception as e:
         st.error(f"Error loading candidates: {str(e)}")
-        st.exception(e)  # This will show the full traceback
+        
+        # Create fallback candidates
+        st.warning("Generating fallback candidate data...")
+        candidates = []
+        
+        # Generate 5 fallback candidates
+        for i in range(1, 6):
+            candidate_id = f"C{9000 + i}"
+            candidate = {
+                "id": i,
+                "name": f"Candidate {candidate_id}",
+                "cv_filename": f"{candidate_id}.pdf",
+                "cv_path": "",
+                "skills": ["Python", "Java", "Communication"],
+                "experience": [{"title": "Software Developer", "company": "Tech Inc", "duration": "3 years"}],
+                "education": [{"degree": "Bachelor's in CS", "university": "Tech University", "year": 2018}]
+            }
+            
+            # Save to database
+            cursor.execute("""
+            INSERT INTO candidates (name, cv_filename, cv_path, skills, experience, education)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                candidate["name"],
+                candidate["cv_filename"],
+                candidate["cv_path"],
+                json.dumps(candidate["skills"]),
+                json.dumps(candidate["experience"]),
+                json.dumps(candidate["education"])
+            ))
+            candidate["id"] = cursor.lastrowid
+            candidates.append(candidate)
+        
+        conn.commit()
         conn.close()
-        return []
+        return candidates
 
 # Function to display PDF (for viewing CVs)
 def display_pdf(file_path):
@@ -720,7 +791,22 @@ def display_pdf(file_path):
     try:
         # First check if file exists
         if not os.path.exists(file_path):
-            st.error(f"PDF file not found: {file_path}")
+            # Fallback: Show a placeholder and mock CV preview
+            st.warning(f"PDF file not found: {file_path}")
+            st.markdown("### Mock CV Preview")
+            
+            # Display placeholder image
+            st.markdown("""
+            <div style="text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">
+                <svg width="100" height="100" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M14 2V8H20" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M12 12C12.5523 12 13 11.5523 13 11C13 10.4477 12.5523 10 12 10C11.4477 10 11 10.4477 11 11C11 11.5523 11.4477 12 12 12Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M9 18C9 16.3431 10.3431 15 12 15C13.6569 15 15 16.3431 15 18" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <p style="margin-top: 10px;">CV Preview not available</p>
+            </div>
+            """, unsafe_allow_html=True)
             return False
         
         # Check file size (limit to 10MB to avoid memory issues)
@@ -729,33 +815,57 @@ def display_pdf(file_path):
             st.warning(f"PDF file is large ({file_size:.1f} MB). Loading preview may take time.")
         
         # Try to read and display the PDF
-        with open(file_path, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        
-        pdf_display = f"""
-            <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>
-        """
-        st.markdown(pdf_display, unsafe_allow_html=True)
-        return True
-    except FileNotFoundError:
-        st.error(f"PDF file not found: {file_path}")
-        return False
-    except Exception as e:
-        st.error(f"Error displaying PDF: {str(e)}")
-        st.info("PDF preview is not available. You can download the file instead.")
-        
-        # Try to provide a download option even if display fails
         try:
+            with open(file_path, "rb") as f:
+                base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+            
+            pdf_display = f"""
+                <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>
+            """
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            return True
+        except Exception as e:
+            # If display fails, provide a download button instead
+            st.error(f"Could not display PDF: {str(e)}")
+            
+            # Display placeholder image
+            st.markdown("""
+            <div style="text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">
+                <svg width="100" height="100" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M14 2V8H20" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <p style="margin-top: 10px;">PDF preview not available in browser</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Provide download button
             with open(file_path, "rb") as file:
                 filename = os.path.basename(file_path)
                 st.download_button(
-                    label="Download PDF", 
+                    label="Download CV", 
                     data=file,
                     file_name=filename,
                     mime="application/pdf"
                 )
-        except Exception as download_error:
-            st.error(f"Unable to provide download option: {str(download_error)}")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error with PDF: {str(e)}")
+        
+        # Show a simple placeholder with CV info instead
+        st.markdown("""
+        <div style="text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">
+            <svg width="100" height="100" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M14 2V8H20" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M16 13H8" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M16 17H8" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M10 9H9H8" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <p style="margin-top: 10px;">CV content not available</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         return False
 
@@ -1014,39 +1124,50 @@ def main():
     if 'selected_candidate_id' not in st.session_state:
         st.session_state.selected_candidate_id = None
     
-    if 'shortlisted' not in st.session_state:
-        st.session_state.shortlisted = {}
+    if 'scheduling_job_id' not in st.session_state:
+        st.session_state.scheduling_job_id = None
     
-    # Minimal sidebar
-    with st.sidebar:
-        st.title("Matchwise")
-        st.markdown("AI-Powered Job Screening")
-        
-        # Simple navigation
-        st.subheader("Navigation")
-        selected = st.radio(
-            "Select a page:",
-            ["Jobs", "Candidates", "Matching", "Interviews"]
-        )
-        st.session_state.page = selected.lower()
-        
-        # Add a divider
-        st.divider()
-        
-        # Display workflow steps
-        st.markdown("""
-        ### Workflow Steps
-        1. Browse job descriptions
-        2. Browse candidate CVs
-        3. Match candidates to jobs
-        4. Shortlist candidates
-        5. Schedule interviews
-        """)
+    # Page title and sidebar
+    st.markdown("# Matchwise - {0}".format(st.session_state.page.title()))
     
-    # Header
-    st.title(f"Matchwise - {st.session_state.page.capitalize()}")
+    # Sidebar for navigation
+    st.sidebar.title("Matchwise")
+    st.sidebar.caption("AI-Powered Job Screening")
     
-    # Main content area
+    st.sidebar.markdown("---")
+    st.sidebar.title("Navigation")
+    
+    st.sidebar.markdown("Select a page:")
+    
+    # Radio buttons for navigation
+    page = st.sidebar.radio(
+        "Select a page:",
+        options=["Jobs", "Candidates", "Matching", "Interviews"],
+        index=["jobs", "candidates", "matching", "interviews"].index(st.session_state.page),
+        label_visibility="collapsed"
+    )
+    
+    # Update session state when page changes
+    if page.lower() != st.session_state.page:
+        st.session_state.page = page.lower()
+        st.rerun()
+    
+    # Workflow steps in sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.title("Workflow Steps")
+    
+    workflow_steps = [
+        "1. Browse job descriptions",
+        "2. Browse candidate CVs",
+        "3. Match candidates to jobs",
+        "4. Shortlist candidates",
+        "5. Schedule interviews"
+    ]
+    
+    for step in workflow_steps:
+        st.sidebar.markdown(step)
+    
+    # Main content based on selected page
     if st.session_state.page == 'jobs':
         render_jobs_page()
     elif st.session_state.page == 'candidates':
@@ -1058,6 +1179,11 @@ def main():
     
     # Footer
     st.divider()
+    
+    # Application notices based on current page
+    if st.session_state.page == 'candidates':
+        st.info("📄 **Note about CV Display**: In deployed environments, CV files may not be accessible. The application will show candidate information extracted from the database instead of the actual CV file.")
+    
     st.caption("© 2025 Matchwise | A craft of Manas Dutta")
 
 def render_jobs_page():
@@ -1216,10 +1342,61 @@ def render_candidates_page():
                 with col2:
                     # Display CV
                     st.markdown("### CV Preview")
+                    # Check if path exists
                     if "cv_path" in selected_candidate and selected_candidate["cv_path"]:
-                        display_pdf(selected_candidate["cv_path"])
+                        # Try to display PDF
+                        if not display_pdf(selected_candidate["cv_path"]):
+                            # If display failed, show extracted information in a nicer format
+                            st.info("Using extracted CV information for preview:")
+                            
+                            # Create a neat display of candidate info
+                            with st.container():
+                                st.markdown("""
+                                <div style="border: 1px solid #ddd; padding: 15px; border-radius: 5px;">
+                                    <h4 style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                                        Candidate Profile
+                                    </h4>
+                                """, unsafe_allow_html=True)
+                                
+                                # Show experience summary
+                                if "experience" in selected_candidate and selected_candidate["experience"]:
+                                    exp_years = sum([int(exp.get("duration", "").split()[0]) 
+                                                  if "duration" in exp and exp.get("duration", "").split() and exp.get("duration", "").split()[0].isdigit() 
+                                                  else 0 
+                                                  for exp in selected_candidate["experience"]])
+                                    st.markdown(f"**Total Experience:** {exp_years}+ years")
+                                
+                                # Show education summary
+                                if "education" in selected_candidate and selected_candidate["education"]:
+                                    highest_degree = selected_candidate["education"][0].get("degree", "Not specified")
+                                    st.markdown(f"**Highest Degree:** {highest_degree}")
+                                
+                                # Show top skills
+                                if "skills" in selected_candidate and selected_candidate["skills"]:
+                                    top_skills = selected_candidate["skills"][:5]
+                                    st.markdown("**Top Skills:** " + ", ".join(top_skills))
+                                
+                                st.markdown("</div>", unsafe_allow_html=True)
                     else:
-                        st.error("CV path not found")
+                        # No CV path available
+                        st.error("CV file not found")
+                        st.info("Using candidate information from database:")
+                        
+                        # Display candidate information in a neat card
+                        with st.container():
+                            st.markdown("""
+                            <div style="border: 1px solid #ddd; padding: 15px; border-radius: 5px; background-color: #f9f9f9;">
+                                <h4 style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                                    Candidate Information
+                                </h4>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown(f"**Name:** {selected_candidate['name']}")
+                            
+                            if "skills" in selected_candidate and selected_candidate["skills"]:
+                                st.markdown("**Skills:** " + ", ".join(selected_candidate["skills"][:5]))
+                            
+                            st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.warning("Candidate not found")
         else:

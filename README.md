@@ -103,6 +103,12 @@ If you encounter issues:
    - The `set_page_config()` call is the first Streamlit command in the file
    - No other Streamlit imports or functions are called before it
 
+5. **CV Preview not showing**: In deployed environments, CV file access may be limited:
+   - When deploying to cloud services (like Streamlit Cloud), the CV PDF files may not be accessible
+   - The application will show a placeholder and extracted CV information instead
+   - For local development, ensure CV files are in the expected directories
+   - If needed, upload your own CV files to the 'CVs' directory
+
 ## Project Structure
 
 ```
