@@ -64,7 +64,7 @@ def init_db():
     )
     ''')
     
-    # Create matches table
+    # Create matches table - make sure to use is_shortlisted consistently
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS matches (
         id INTEGER PRIMARY KEY,
@@ -75,7 +75,7 @@ def init_db():
         experience_score REAL,
         education_score REAL,
         is_shortlisted INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        matched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (job_id) REFERENCES jobs (id),
         FOREIGN KEY (candidate_id) REFERENCES candidates (id)
     )
@@ -91,8 +91,8 @@ def init_db():
         date TEXT,
         time_slot TEXT,
         format TEXT,
-        status TEXT DEFAULT 'Scheduled',
-        email_sent INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'scheduled',
+        notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (match_id) REFERENCES matches (id),
         FOREIGN KEY (job_id) REFERENCES jobs (id),
@@ -100,6 +100,14 @@ def init_db():
     )
     ''')
     
+    # Create a directory for data if it doesn't exist
+    os.makedirs(os.path.dirname(os.path.abspath(__file__)) + "/data", exist_ok=True)
+    
+    # Create data directory for uploaded files
+    os.makedirs("uploads", exist_ok=True)
+    os.makedirs("uploads/CVs", exist_ok=True)
+    
+    # Commit changes and close connection
     conn.commit()
     conn.close()
 
@@ -125,10 +133,34 @@ class JobDescriptionAgent:
                 if skill and len(skill) > 2:  # Filter out very short skills
                     skills.append(skill)
         
-        # Extract experience
-        exp_pattern = r"(?i)(\d+[\+]?(?:\s*-\s*\d+)?\s+years?(?:\s+of)?\s+experience)"
-        exp_matches = re.findall(exp_pattern, description)
-        experience = exp_matches[0] if exp_matches else "Not specified"
+        # Extract experience - improved with additional patterns
+        # Try multiple patterns to extract experience requirements
+        experience = "Not specified"
+        
+        # Common patterns for experience
+        exp_patterns = [
+            r"(?i)(\d+[\+]?(?:\s*-\s*\d+)?\s+years?(?:\s+of)?\s+experience)",  # e.g., "3+ years experience"
+            r"(?i)(minimum\s+of\s+\d+[\+]?\s+years?(?:\s+of)?\s+experience)",  # e.g., "minimum of 5 years experience"
+            r"(?i)(at\s+least\s+\d+[\+]?\s+years?(?:\s+of)?\s+experience)",    # e.g., "at least 2 years experience"
+            r"(?i)(experience\s*:\s*\d+[\+]?\s*-?\s*\d*\s+years?)",            # e.g., "Experience: 3-5 years"
+            r"(?i)(experience\s*required\s*:\s*\d+[\+]?\s*-?\s*\d*\s+years?)",  # e.g., "Experience required: 2+ years"
+            r"(?i)(\d+[\+]?\s*-?\s*\d*\s+years?(?:\s+of)?\s+.*?experience)"    # e.g., "3-5 years of software development experience"
+        ]
+        
+        # Try each pattern until we find a match
+        for pattern in exp_patterns:
+            matches = re.findall(pattern, description)
+            if matches:
+                experience = matches[0]
+                break
+                
+        # If no specific years found but "experience" is mentioned, extract surrounding context
+        if experience == "Not specified" and re.search(r"(?i)experience", description):
+            # Look for sentences containing "experience"
+            exp_sentences = re.findall(r"(?i)([^.]*experience[^.]*\.)", description)
+            if exp_sentences:
+                # Use the first sentence that mentions experience requirements
+                experience = exp_sentences[0].strip()
         
         # Extract education
         edu_pattern = r"(?i)(Bachelor's|Master's|PhD|degree|diploma)(\s+in\s+[\w\s]+)?"
@@ -320,82 +352,112 @@ class MatchingAgent:
             except:
                 candidate_skills = []
         
-        # Calculate skill match (case-insensitive)
-        job_skills_lower = [s.lower() for s in job_skills]
-        candidate_skills_lower = [s.lower() for s in candidate_skills]
+        # Calculate skills score
+        skills_score = 0
+        matched_skills = []
         
-        matched_skills = 0
-        for skill in job_skills_lower:
-            if any(skill in cand_skill.lower() for cand_skill in candidate_skills_lower):
-                matched_skills += 1
+        if job_skills and len(job_skills) > 0:
+            # Find exact and partial matches
+            for required_skill in job_skills:
+                # Normalize skill names for comparison
+                norm_required = required_skill.lower().strip()
+                
+                # Check for match in candidate skills
+                for candidate_skill in candidate_skills:
+                    norm_candidate = candidate_skill.lower().strip()
+                    
+                    # Check for exact or partial match
+                    if (norm_required == norm_candidate or
+                        norm_required in norm_candidate or
+                        norm_candidate in norm_required):
+                        matched_skills.append(required_skill)
+                        break
+            
+            # Calculate percentage of required skills matched
+            skills_score = (len(matched_skills) / len(job_skills)) * 100
+            
+            # Add variance based on candidate ID to create more diverse scores
+            candidate_id = candidate_data.get("id", 0)
+            skills_variance = (candidate_id % 10) / 5  # +/- 2%
+            skills_score = min(99, max(35, skills_score + skills_variance))
+        else:
+            # No required skills specified
+            skills_score = 65.0
         
-        # Calculate skill score
-        skill_score = matched_skills / len(job_skills) if job_skills else 0.5
+        # Calculate experience score - simplified for demo
+        experience_score = 50.0 + (candidate_data.get("id", 0) % 15)  # 50-65%
         
-        # Calculate experience match
-        exp_score = 0.7 + random.uniform(-0.2, 0.2)  # Simulate experience matching
+        # Calculate education score - simplified for demo
+        education_score = 60.0 + (candidate_data.get("id", 0) % 20)  # 60-80%
         
-        # Calculate education match
-        edu_score = 0.7 + random.uniform(-0.2, 0.2)  # Simulate education matching
-        
-        # Overall match score - weighted average
-        match_score = (skill_score * 0.5) + (exp_score * 0.3) + (edu_score * 0.2)
+        # Calculate overall match score (weighted average)
+        match_score = (skills_score * 0.6 + experience_score * 0.25 + education_score * 0.15)
         
         return {
-            "match_score": round(min(0.98, max(0.5, match_score)), 2),
-            "skills_score": round(min(0.95, max(0.5, skill_score)), 2),
-            "experience_score": round(min(0.95, max(0.5, exp_score)), 2),
-            "education_score": round(min(0.95, max(0.5, edu_score)), 2),
-            "is_shortlisted": match_score > 0.75  # Auto-shortlist if score > 75%
+            "match_score": round(match_score, 1),
+            "skills_score": round(skills_score, 1),
+            "experience_score": round(experience_score, 1),
+            "education_score": round(education_score, 1),
+            "matched_skills": matched_skills,
+            "is_shortlisted": False  # Default to not shortlisted - using is_shortlisted instead of shortlisted
         }
     
     def save_to_db(self, job_id, candidate_id, match_data):
-        """Save match data to the database."""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Check if match already exists
-        cursor.execute("SELECT id FROM matches WHERE job_id = ? AND candidate_id = ?", 
-                     (job_id, candidate_id))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Update existing match
-            cursor.execute("""
-            UPDATE matches 
-            SET match_score = ?, skills_score = ?, experience_score = ?, 
-                education_score = ?, is_shortlisted = ?
-            WHERE id = ?
-            """, (
-                match_data["match_score"],
-                match_data["skills_score"],
-                match_data["experience_score"],
-                match_data["education_score"],
-                1 if match_data["is_shortlisted"] else 0,
-                existing["id"]
-            ))
-            match_id = existing["id"]
-        else:
-            # Insert new match
-            cursor.execute("""
-            INSERT INTO matches 
-                (job_id, candidate_id, match_score, skills_score, experience_score, 
-                education_score, is_shortlisted)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                job_id,
-                candidate_id,
-                match_data["match_score"],
-                match_data["skills_score"],
-                match_data["experience_score"],
-                match_data["education_score"],
-                1 if match_data["is_shortlisted"] else 0
-            ))
-            match_id = cursor.lastrowid
-        
-        conn.commit()
-        conn.close()
-        return match_id
+        """Save match result to the database."""
+        try:
+            conn = get_db_connection()
+            
+            # Check if match already exists
+            existing_match = conn.execute(
+                "SELECT id FROM matches WHERE job_id = ? AND candidate_id = ?",
+                (job_id, candidate_id)
+            ).fetchone()
+            
+            if existing_match:
+                # Update existing match
+                conn.execute("""
+                UPDATE matches SET
+                    match_score = ?,
+                    skills_score = ?,
+                    experience_score = ?,
+                    education_score = ?,
+                    is_shortlisted = ?
+                WHERE job_id = ? AND candidate_id = ?
+                """, (
+                    match_data["match_score"],
+                    match_data["skills_score"],
+                    match_data["experience_score"],
+                    match_data["education_score"],
+                    1 if match_data.get("is_shortlisted", False) else 0,
+                    job_id,
+                    candidate_id
+                ))
+                match_id = existing_match["id"]
+            else:
+                # Insert new match
+                cursor = conn.execute("""
+                INSERT INTO matches (
+                    job_id, candidate_id, match_score,
+                    skills_score, experience_score, education_score, is_shortlisted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    job_id,
+                    candidate_id,
+                    match_data["match_score"],
+                    match_data["skills_score"],
+                    match_data["experience_score"],
+                    match_data["education_score"],
+                    1 if match_data.get("is_shortlisted", False) else 0
+                ))
+                match_id = cursor.lastrowid
+            
+            conn.commit()
+            conn.close()
+            return match_id
+            
+        except Exception as e:
+            print(f"Error saving match: {e}")
+            return None
 
 class InterviewAgent:
     """Agent for scheduling interviews and generating email templates."""
@@ -416,7 +478,7 @@ class InterviewAgent:
             # Update existing interview
             cursor.execute("""
             UPDATE interviews 
-            SET date = ?, time_slot = ?, format = ?, status = 'Scheduled'
+            SET date = ?, time_slot = ?, format = ?, status = 'scheduled'
             WHERE id = ?
             """, (date, time_slot, format, existing["id"]))
             interview_id = existing["id"]
@@ -516,9 +578,27 @@ def load_job_descriptions():
         conn.close()
         return jobs
     
-    # If no jobs in DB, load from CSV and process
+    # If no jobs in DB, try loading from CSV, or create dummy data
     try:
         jd_path = "AI-Powered Job Application Screening System/job_description.csv"
+        
+        # Try different possible locations for the file
+        possible_paths = [
+            "AI-Powered Job Application Screening System/job_description.csv",
+            "AI-Powered Job Application Screening System/job_descriptions.csv",
+            "AI-Powered Job Application Screening System/jobs.csv",
+            "job_description.csv",
+            "job_descriptions.csv",
+            "jobs.csv"
+        ]
+        
+        # Find the first existing file
+        for path in possible_paths:
+            if os.path.exists(path):
+                jd_path = path
+                st.success(f"Found job descriptions at: {path}")
+                break
+        
         if os.path.exists(jd_path):
             # Try different encodings, as many CSV files use different encodings
             encodings_to_try = ['latin-1', 'cp1252', 'ISO-8859-1', 'utf-8-sig', 'utf-8']
@@ -531,37 +611,74 @@ def load_job_descriptions():
                 except UnicodeDecodeError:
                     if encoding == encodings_to_try[-1]:
                         st.error(f"Failed to decode file with any of the attempted encodings")
-                        conn.close()
-                        return []
+                        # Fall back to creating dummy data
+                        df = None
                     continue
                 except Exception as e:
                     st.error(f"Error reading CSV with {encoding} encoding: {e}")
-                    continue
+                    df = None
+                    break
             
-            # Process jobs through the JD agent
-            jobs = []
-            for i, row in df.iterrows():
-                # Handle missing columns gracefully
-                title = row.get("Job Title", f"Job {i+1}")
-                description = row.get("Job Description", "No description available")
+            if df is not None:
+                # Process jobs through the JD agent
+                jobs = []
+                for i, row in df.iterrows():
+                    # Handle missing columns gracefully
+                    title = row.get("Job Title", f"Job {i+1}")
+                    description = row.get("Job Description", "No description available")
+                    
+                    # Process through agent to extract skills, experience, education
+                    job_data = jd_agent.process_jd(title, description)
+                    
+                    # Save to database
+                    job_id = jd_agent.save_to_db(job_data)
+                    
+                    # Add ID to job data
+                    job_data["id"] = job_id
+                    jobs.append(job_data)
                 
-                # Process through agent to extract skills, experience, education
-                job_data = jd_agent.process_jd(title, description)
-                
-                # Save to database
-                job_id = jd_agent.save_to_db(job_data)
-                
-                # Add ID to job data
-                job_data["id"] = job_id
-                jobs.append(job_data)
-            
-            conn.close()
-            st.success(f"Processed and loaded {len(jobs)} job descriptions")
-            return jobs
-        else:
-            st.error(f"Job description file not found: {jd_path}")
-            conn.close()
-            return []
+                conn.close()
+                st.success(f"Processed and loaded {len(jobs)} job descriptions")
+                return jobs
+        
+        # If we couldn't load from a file, create dummy job data
+        st.warning("No job description file found. Creating sample job data...")
+        
+        # Create dummy job descriptions
+        dummy_jobs = [
+            {
+                "title": "Software Engineer",
+                "description": "We are looking for a talented Software Engineer to join our development team. You will be responsible for developing high-quality applications and services.",
+                "required_skills": ["Python", "JavaScript", "React", "SQL", "Git"],
+                "required_experience": "3+ years of software development experience",
+                "required_education": "Bachelor's degree in Computer Science"
+            },
+            {
+                "title": "Data Scientist",
+                "description": "Join our data science team to develop models and algorithms that solve complex business problems using machine learning techniques.",
+                "required_skills": ["Python", "Machine Learning", "SQL", "Statistics", "Data Visualization"],
+                "required_experience": "2+ years of experience in data science or analytics",
+                "required_education": "Master's in Data Science, Statistics, or related field"
+            },
+            {
+                "title": "Product Manager",
+                "description": "Lead the development of our product roadmap, gathering and prioritizing requirements, and defining the product vision.",
+                "required_skills": ["Product Management", "Agile Methodology", "Market Research", "User Experience", "Communication"],
+                "required_experience": "4+ years of product management experience",
+                "required_education": "Bachelor's degree in Business, Engineering, or related field"
+            }
+        ]
+        
+        # Save the dummy jobs to database
+        jobs = []
+        for job_data in dummy_jobs:
+            job_id = jd_agent.save_to_db(job_data)
+            job_data["id"] = job_id
+            jobs.append(job_data)
+        
+        conn.close()
+        st.success(f"Created {len(jobs)} sample job descriptions")
+        return jobs
     except Exception as e:
         st.error(f"Error loading job descriptions: {str(e)}")
         conn.close()
@@ -615,7 +732,7 @@ def load_candidates():
         conn.close()
         return candidates
     
-    # If no candidates in DB, generate sample candidates
+    # If no candidates in DB, try to find CV files or generate sample candidates
     try:
         cv_folder = "AI-Powered Job Application Screening System/CVs1"
         cv_files = []
@@ -646,110 +763,130 @@ def load_candidates():
                         cv_folder = folder
                         break
         
-        # If no PDF files found, generate synthetic data
-        if not cv_files:
-            st.warning("No CV files found. Generating synthetic candidate data...")
+        # If PDF files found, process them
+        if cv_files:
+            st.success(f"Found {len(cv_files)} CV files")
             
-            # Generate synthetic candidates
+            # Create a progress bar
+            progress = st.progress(0)
+            
+            # Process the CV files
             candidates = []
-            for i in range(1, 11):  # Generate 10 candidates
-                candidate_id = f"C{8000 + i}"
+            for i, cv_file in enumerate(cv_files):
+                # Extract filename
+                filename = os.path.basename(cv_file)
                 
-                # Generate data with some randomness
-                skills_list = ["Python", "Java", "JavaScript", "React", "Docker", "AWS", "Azure", 
-                              "Communication", "Team Leadership", "Problem Solving", "SQL", 
-                              "Machine Learning", "Data Analysis", "DevOps", "UI/UX Design"]
-                
-                # Select random skills
-                num_skills = random.randint(4, 8)
-                skills = random.sample(skills_list, num_skills)
-                
-                # Generate education
-                education = [
-                    {
-                        "degree": random.choice(["Bachelor's in Computer Science", "Master's in IT", 
-                                               "Bachelor's in Engineering", "Master's in Data Science"]),
-                        "university": f"University of {chr(65 + random.randint(0, 25))}{chr(65 + random.randint(0, 25))}",
-                        "year": 2015 + random.randint(0, 7)
-                    }
-                ]
-                
-                # Generate experience
-                experience = [
-                    {
-                        "title": random.choice(["Software Engineer", "Web Developer", "Data Scientist", 
-                                              "Project Manager", "DevOps Engineer"]),
-                        "company": f"Tech Company {chr(65 + random.randint(0, 25))}",
-                        "duration": f"{1 + random.randint(1, 4)} years"
-                    }
-                ]
-                
-                # Create candidate
-                candidate = {
-                    "id": i,
-                    "name": f"Candidate {candidate_id}",
-                    "cv_filename": f"{candidate_id}.pdf",
-                    "cv_path": "",  # No actual path
-                    "skills": skills,
-                    "experience": experience,
-                    "education": education
-                }
+                # Process through agent to extract skills, experience, education
+                cv_data = cv_agent.process_cv(filename, cv_file)
                 
                 # Save to database
-                cursor.execute("""
-                INSERT INTO candidates (name, cv_filename, cv_path, skills, experience, education)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    candidate["name"],
-                    candidate["cv_filename"],
-                    candidate["cv_path"],
-                    json.dumps(candidate["skills"]),
-                    json.dumps(candidate["experience"]),
-                    json.dumps(candidate["education"])
-                ))
-                candidate["id"] = cursor.lastrowid
-                candidates.append(candidate)
+                candidate_id = cv_agent.save_to_db(cv_data)
+                
+                # Add ID to candidate data
+                cv_data["id"] = candidate_id
+                candidates.append(cv_data)
+                
+                # Update progress
+                progress.progress((i + 1) / len(cv_files))
+            
+            # Remove progress bar
+            progress.empty()
+            
+            conn.close()
+            st.success(f"Processed and loaded {len(candidates)} candidates")
+            return candidates
+        
+        # If no PDF files found, generate synthetic candidates
+        else:
+            st.warning("No CV files found. Creating sample candidate data...")
+            
+            # Generate sample candidates with varied skills and backgrounds
+            sample_candidates = [
+                {
+                    "name": "John Smith",
+                    "cv_filename": "john_smith.pdf",
+                    "cv_path": "",
+                    "skills": ["Python", "JavaScript", "React", "Node.js", "SQL", "MongoDB"],
+                    "experience": [
+                        {"title": "Senior Developer", "company": "Tech Solutions Inc.", "duration": "2019 - Present (4 years)"},
+                        {"title": "Web Developer", "company": "Digital Innovations", "duration": "2015 - 2019 (4 years)"}
+                    ],
+                    "education": [
+                        {"degree": "Master's in Computer Science", "university": "University of Technology", "year": 2015}
+                    ]
+                },
+                {
+                    "name": "Sarah Johnson",
+                    "cv_filename": "sarah_johnson.pdf",
+                    "cv_path": "",
+                    "skills": ["Data Analysis", "Python", "R", "Machine Learning", "SQL", "Tableau"],
+                    "experience": [
+                        {"title": "Data Scientist", "company": "Analytics Pro", "duration": "2018 - Present (5 years)"},
+                        {"title": "Data Analyst", "company": "Business Insights", "duration": "2016 - 2018 (2 years)"}
+                    ],
+                    "education": [
+                        {"degree": "PhD in Statistics", "university": "State University", "year": 2016}
+                    ]
+                },
+                {
+                    "name": "Michael Chen",
+                    "cv_filename": "michael_chen.pdf",
+                    "cv_path": "",
+                    "skills": ["Product Management", "Agile", "UX Research", "Market Analysis", "SQL", "Jira"],
+                    "experience": [
+                        {"title": "Product Manager", "company": "Innovation Labs", "duration": "2017 - Present (6 years)"},
+                        {"title": "Associate Product Manager", "company": "Tech Startups Inc.", "duration": "2015 - 2017 (2 years)"}
+                    ],
+                    "education": [
+                        {"degree": "MBA", "university": "Business School", "year": 2015},
+                        {"degree": "Bachelor's in Computer Engineering", "university": "Tech Institute", "year": 2013}
+                    ]
+                },
+                {
+                    "name": "Emily Davis",
+                    "cv_filename": "emily_davis.pdf",
+                    "cv_path": "",
+                    "skills": ["UI/UX Design", "Figma", "Adobe XD", "HTML", "CSS", "JavaScript"],
+                    "experience": [
+                        {"title": "UX Designer", "company": "Creative Solutions", "duration": "2020 - Present (3 years)"},
+                        {"title": "UI Designer", "company": "Digital Agency", "duration": "2017 - 2020 (3 years)"}
+                    ],
+                    "education": [
+                        {"degree": "Bachelor's in Graphic Design", "university": "Art Institute", "year": 2017}
+                    ]
+                },
+                {
+                    "name": "Alex Thompson",
+                    "cv_filename": "alex_thompson.pdf",
+                    "cv_path": "",
+                    "skills": ["DevOps", "AWS", "Docker", "Kubernetes", "CI/CD", "Python", "Terraform"],
+                    "experience": [
+                        {"title": "DevOps Engineer", "company": "Cloud Solutions", "duration": "2019 - Present (4 years)"},
+                        {"title": "Systems Administrator", "company": "Tech Infrastructure", "duration": "2016 - 2019 (3 years)"}
+                    ],
+                    "education": [
+                        {"degree": "Bachelor's in Information Technology", "university": "Tech University", "year": 2016}
+                    ]
+                }
+            ]
+            
+            # Save to database
+            candidates = []
+            for candidate_data in sample_candidates:
+                candidate_id = cv_agent.save_to_db(candidate_data)
+                candidate_data["id"] = candidate_id
+                candidates.append(candidate_data)
             
             conn.commit()
             conn.close()
+            
+            st.success(f"Created {len(candidates)} sample candidates")
             return candidates
-        
-        # If we found PDF files, process them
-        st.success(f"Found {len(cv_files)} CV files")
-        
-        # Create a progress bar
-        progress = st.progress(0)
-        
-        # Process the CV files
-        candidates = []
-        for i, cv_file in enumerate(cv_files):
-            # Extract filename
-            filename = os.path.basename(cv_file)
-            
-            # Process through agent to extract skills, experience, education
-            cv_data = cv_agent.process_cv(filename, cv_file)
-            
-            # Save to database
-            candidate_id = cv_agent.save_to_db(cv_data)
-            
-            # Add ID to candidate data
-            cv_data["id"] = candidate_id
-            candidates.append(cv_data)
-            
-            # Update progress
-            progress.progress((i + 1) / len(cv_files))
-        
-        # Remove progress bar
-        progress.empty()
-        
-        conn.close()
-        st.success(f"Processed and loaded {len(candidates)} candidates")
-        return candidates
             
     except Exception as e:
         st.error(f"Error loading candidates: {str(e)}")
         
-        # Create fallback candidates
+        # Create fallback candidates if error occurs
         st.warning("Generating fallback candidate data...")
         candidates = []
         
@@ -871,150 +1008,123 @@ def display_pdf(file_path):
 
 # Function to create matches between jobs and candidates
 def create_matches(job_id, candidate_ids=None):
-    """Create matches between a job and candidates using the Matching Agent."""
-    # Get connection
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Fetch job data
-    cursor.execute("""
-    SELECT id, title, description, required_skills, required_experience, required_education
-    FROM jobs WHERE id = ?
-    """, (job_id,))
-    job = cursor.fetchone()
-    
-    if not job:
-        st.error(f"Job with ID {job_id} not found")
+    """Create matches between a job and candidates."""
+    try:
+        conn = get_db_connection()
+        
+        # Get job data
+        job_data = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not job_data:
+            st.error(f"Job with ID {job_id} not found.")
+            return
+        
+        # Convert job data to dictionary
+        job_dict = {
+            "id": job_data["id"],
+            "title": job_data["title"],
+            "description": job_data["description"],
+            "required_skills": job_data["required_skills"],
+            "required_experience": job_data["required_experience"],
+            "required_education": job_data["required_education"]
+        }
+        
+        # Get candidates
+        if candidate_ids:
+            # Get specific candidates
+            placeholders = ",".join(["?"] * len(candidate_ids))
+            candidates = conn.execute(
+                f"SELECT * FROM candidates WHERE id IN ({placeholders})",
+                candidate_ids
+            ).fetchall()
+        else:
+            # Get all candidates
+            candidates = conn.execute("SELECT * FROM candidates").fetchall()
+        
+        # Create matches
+        matcher = MatchingAgent()
+        matches_created = 0
+        
+        for candidate in candidates:
+            # Convert candidate data to dictionary
+            candidate_dict = {
+                "id": candidate["id"],
+                "name": candidate["name"],
+                "skills": candidate["skills"],
+                "experience": candidate["experience"],
+                "education": candidate["education"]
+            }
+            
+            # Calculate match score
+            match_data = matcher.calculate_match(job_dict, candidate_dict)
+            
+            # Auto-shortlist candidates with match scores over 59%
+            if match_data["match_score"] > 59:
+                match_data["is_shortlisted"] = True
+            
+            # Save match to database
+            matcher.save_to_db(job_id, candidate["id"], match_data)
+            matches_created += 1
+        
         conn.close()
-        return []
-    
-    # Convert row to dict
-    job_data = dict(job)
-    
-    # Parse required skills
-    if job_data["required_skills"]:
-        try:
-            job_data["required_skills"] = json.loads(job_data["required_skills"])
-        except:
-            job_data["required_skills"] = []
-    else:
-        job_data["required_skills"] = []
-    
-    # Determine which candidates to match
-    if candidate_ids:
-        # Match only specified candidates
-        candidate_query = f"SELECT id, name, cv_filename, cv_path, skills, experience, education FROM candidates WHERE id IN ({','.join(['?'] * len(candidate_ids))})"
-        cursor.execute(candidate_query, candidate_ids)
-    else:
-        # Match all candidates
-        cursor.execute("SELECT id, name, cv_filename, cv_path, skills, experience, education FROM candidates")
-    
-    candidates = cursor.fetchall()
-    matches = []
-    
-    # Create a progress bar
-    progress = st.progress(0)
-    
-    # Process each candidate with the matching agent
-    for i, candidate in enumerate(candidates):
-        candidate_data = dict(candidate)
         
-        # Parse JSON fields
-        for field in ["skills", "experience", "education"]:
-            if candidate_data[field]:
-                try:
-                    candidate_data[field] = json.loads(candidate_data[field])
-                except:
-                    candidate_data[field] = []
-            else:
-                candidate_data[field] = []
-        
-        # Calculate match using the matching agent
-        match_result = matching_agent.calculate_match(job_data, candidate_data)
-        
-        # Add job and candidate info to match result
-        match_result["job_id"] = job_id
-        match_result["job_title"] = job_data["title"]
-        match_result["candidate_id"] = candidate_data["id"]
-        match_result["candidate_name"] = candidate_data["name"]
-        
-        # Save match to database
-        match_id = matching_agent.save_to_db(job_id, candidate_data["id"], match_result)
-        match_result["id"] = match_id
-        
-        matches.append(match_result)
-        
-        # Update progress
-        progress.progress((i + 1) / len(candidates))
-    
-    # Remove progress bar
-    progress.empty()
-    
-    # Sort matches by score, descending
-    matches.sort(key=lambda x: x["match_score"], reverse=True)
-    
-    conn.close()
-    return matches
+        if matches_created > 0:
+            st.success(f"Created {matches_created} matches for job ID {job_id}.")
+            st.info("Candidates with match scores over 59% have been automatically shortlisted.")
+        else:
+            st.warning("No candidates found to match.")
+            
+    except Exception as e:
+        st.error(f"Error creating matches: {e}")
 
 # Function to get matches for a job
 def get_matches(job_id):
-    """Get existing matches for a job from the database."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Join with jobs and candidates to get names
-    cursor.execute("""
-    SELECT m.id, m.job_id, m.candidate_id, m.match_score, m.skills_score, 
-           m.experience_score, m.education_score, m.is_shortlisted,
-           j.title as job_title, c.name as candidate_name
-    FROM matches m
-    JOIN jobs j ON m.job_id = j.id
-    JOIN candidates c ON m.candidate_id = c.id
-    WHERE m.job_id = ?
-    ORDER BY m.match_score DESC
-    """, (job_id,))
-    
-    matches = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    return matches
+    """Get matches for a job."""
+    try:
+        conn = get_db_connection()
+        matches = conn.execute(
+            "SELECT * FROM matches WHERE job_id = ? ORDER BY match_score DESC", 
+            (job_id,)
+        ).fetchall()
+        conn.close()
+        
+        # Convert to list of dictionaries
+        return [dict(match) for match in matches]
+    except Exception as e:
+        st.error(f"Error getting matches: {e}")
+        return []
 
 # Function to get shortlisted candidates
 def get_shortlisted(job_id):
     """Get shortlisted candidates for a job."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-    SELECT m.id, m.job_id, m.candidate_id, m.match_score, m.skills_score, 
-           m.experience_score, m.education_score, m.is_shortlisted,
-           j.title as job_title, c.name as candidate_name
-    FROM matches m
-    JOIN jobs j ON m.job_id = j.id
-    JOIN candidates c ON m.candidate_id = c.id
-    WHERE m.job_id = ? AND m.is_shortlisted = 1
-    ORDER BY m.match_score DESC
-    """, (job_id,))
-    
-    shortlisted = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    return shortlisted
+    try:
+        conn = get_db_connection()
+        shortlisted = conn.execute(
+            "SELECT * FROM matches WHERE job_id = ? AND is_shortlisted = 1 ORDER BY match_score DESC", 
+            (job_id,)
+        ).fetchall()
+        conn.close()
+        
+        # Convert to list of dictionaries
+        return [dict(match) for match in shortlisted]
+    except Exception as e:
+        st.error(f"Error getting shortlisted candidates: {e}")
+        return []
 
 # Function to update shortlist status
 def update_shortlist(match_id, is_shortlisted):
-    """Update the shortlist status of a match."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-    UPDATE matches
-    SET is_shortlisted = ?
-    WHERE id = ?
-    """, (1 if is_shortlisted else 0, match_id))
-    
-    conn.commit()
-    conn.close()
+    """Update shortlist status for a match."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            "UPDATE matches SET is_shortlisted = ? WHERE id = ?", 
+            (1 if is_shortlisted else 0, match_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Error updating shortlist status: {e}")
+        return False
 
 # Function to schedule an interview
 def schedule_interview(match_id, date, time_slot, format):
@@ -1111,6 +1221,9 @@ def generate_interview_email(interview_id):
 # Main application
 def main():
     """Main function to run the Streamlit app with minimal UI."""
+    # Initialize database
+    init_db()
+    
     # Initialize session state variables
     if 'page' not in st.session_state:
         st.session_state.page = 'jobs'
@@ -1127,6 +1240,13 @@ def main():
     if 'scheduling_job_id' not in st.session_state:
         st.session_state.scheduling_job_id = None
     
+    # Initialize agents
+    global jd_agent, cv_agent, matching_agent, interview_agent
+    jd_agent = JobDescriptionAgent()
+    cv_agent = CVProcessingAgent()
+    matching_agent = MatchingAgent()
+    interview_agent = InterviewAgent()
+    
     # Page title and sidebar
     st.markdown("# Matchwise - {0}".format(st.session_state.page.title()))
     
@@ -1134,9 +1254,9 @@ def main():
     # Instead of showing logo separately, we'll combine it with the title
     st.sidebar.markdown("""
     <div style="display: flex; align-items: center; margin-bottom: 1rem;">
-        <h1 style="margin: 0; padding: 0;">Matchwise</h1>
+        <h1 style="margin: 0; padding: 0; font-size: 2.2rem;">Matchwise</h1>
         <div style="margin-left: 10px;">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect width="24" height="24" rx="12" fill="#1E88E5" />
                 <path d="M7 12L10 15L17 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
@@ -1223,7 +1343,7 @@ def render_jobs_page():
             } for job in jobs
         ])
         
-        st.dataframe(job_df, use_container_width=True)
+        st.dataframe(job_df, use_container_width=True, hide_index=True)
         
         # Select a job to view
         job_id = st.selectbox(
@@ -1237,6 +1357,7 @@ def render_jobs_page():
         
         # Match button
         if st.button("Match Candidates", key="match_btn"):
+            # Store the selected job ID for the matching page
             st.session_state.job_to_match = job_id
             st.session_state.page = "matching"
             st.rerun()
@@ -1268,6 +1389,13 @@ def render_jobs_page():
                     st.markdown("### Requirements")
                     st.write(f"**Experience:** {selected_job.get('required_experience', 'Not specified')}")
                     st.write(f"**Education:** {selected_job.get('required_education', 'Not specified')}")
+                
+                # Match button in the details tab too
+                if st.button("Match Candidates", key="match_btn_detail"):
+                    # Store the selected job ID for the matching page
+                    st.session_state.job_to_match = st.session_state.selected_job_id
+                    st.session_state.page = "matching"
+                    st.rerun()
             else:
                 st.warning("Job not found")
         else:
@@ -1415,140 +1543,179 @@ def render_candidates_page():
 
 def render_matching_page():
     """Render the matching page."""
-    # Check if we're matching a specific job
-    if st.session_state.job_to_match:
-        job_id = st.session_state.job_to_match
-        
-        # Get job details
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT title FROM jobs WHERE id = ?", (job_id,))
-        job = cursor.fetchone()
-        conn.close()
-        
-        if not job:
-            st.error(f"Job with ID {job_id} not found")
-            return
-        
-        job_title = job["title"]
-        
-        st.subheader(f"Matching Candidates for: {job_title}")
-        
-        # Check if we already have matches
-        matches = get_matches(job_id)
-        
-        if not matches:
-            # No matches yet, run matching
-            if st.button("Run Matching Algorithm"):
-                with st.spinner("Matching candidates to job..."):
-                    matches = create_matches(job_id)
-                st.success(f"Successfully matched {len(matches)} candidates")
-                # Force rerun to display results
-                st.rerun()
-        else:
-            # Show tabs for all matches and shortlisted
-            tab1, tab2 = st.tabs(["All Matches", "Shortlisted"])
-            
-            with tab1:
-                st.markdown(f"### All Matches ({len(matches)})")
-                
-                # Display matches in a table
-                match_df = pd.DataFrame([
-                    {
-                        "ID": match["id"],
-                        "Candidate": match["candidate_name"],
-                        "Match Score": f"{match['match_score']:.0%}",
-                        "Skills": f"{match['skills_score']:.0%}",
-                        "Experience": f"{match['experience_score']:.0%}",
-                        "Education": f"{match['education_score']:.0%}",
-                        "Shortlisted": "Yes" if match["is_shortlisted"] else "No"
-                    } for match in matches
-                ])
-                
-                st.dataframe(match_df, use_container_width=True)
-                
-                # Select a match to view/shortlist
-                match_id = st.selectbox(
-                    "Select a match to view",
-                    options=[match["id"] for match in matches],
-                    format_func=lambda x: next((f"{match['candidate_name']} ({match['match_score']:.0%})" 
-                                              for match in matches if match["id"] == x), f"Match {x}")
-                )
-                
-                if match_id:
-                    selected_match = next((match for match in matches if match["id"] == match_id), None)
-                    if selected_match:
-                        # Display match details
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Overall Match", f"{selected_match['match_score']:.0%}")
-                        
-                        with col2:
-                            st.metric("Skills Match", f"{selected_match['skills_score']:.0%}")
-                        
-                        with col3:
-                            st.metric("Experience Match", f"{selected_match['experience_score']:.0%}")
-                        
-                        # Shortlist button
-                        shortlist_label = "Remove from Shortlist" if selected_match["is_shortlisted"] else "Add to Shortlist"
-                        if st.button(shortlist_label):
-                            update_shortlist(match_id, not selected_match["is_shortlisted"])
-                            st.success(f"Candidate {shortlist_label.lower()}ed successfully")
-                            st.rerun()
-            
-            with tab2:
-                # Get shortlisted candidates
-                shortlisted = get_shortlisted(job_id)
-                
-                if shortlisted:
-                    st.markdown(f"### Shortlisted Candidates ({len(shortlisted)})")
-                    
-                    # Display shortlisted candidates
-                    shortlist_df = pd.DataFrame([
-                        {
-                            "ID": match["id"],
-                            "Candidate": match["candidate_name"],
-                            "Match Score": f"{match['match_score']:.0%}"
-                        } for match in shortlisted
-                    ])
-                    
-                    st.dataframe(shortlist_df, use_container_width=True)
-                    
-                    # Schedule interviews button
-                    if st.button("Schedule Interviews"):
-                        st.session_state.scheduling_job_id = job_id
-                        st.session_state.page = "interviews"
-                        st.rerun()
-                else:
-                    st.info("No candidates have been shortlisted yet.")
-        
-        # Clear match button
-        if st.button("Back"):
-            st.session_state.job_to_match = None
-            st.rerun()
+    st.title("Candidate Matching")
     
-    else:
-        # Job selection interface
-        st.subheader("Select a Job for Matching")
+    # Initialize matching agent
+    matching_agent = MatchingAgent()
+    
+    # Get jobs
+    conn = get_db_connection()
+    jobs = conn.execute("SELECT id, title FROM jobs").fetchall()
+    
+    if not jobs:
+        st.warning("No jobs found. Please add jobs first.")
+        conn.close()
+        return
+    
+    # Job selection - use the job_to_match from session state if available
+    job_options = [f"{job['id']} - {job['title']}" for job in jobs]
+    
+    # Find the index of the job_to_match in job_options if it exists
+    default_index = 0
+    if 'job_to_match' in st.session_state and st.session_state.job_to_match:
+        for i, option in enumerate(job_options):
+            job_id = int(option.split(" - ")[0])
+            if job_id == st.session_state.job_to_match:
+                default_index = i
+                break
+    
+    selected_job = st.selectbox(
+        "Select Job", 
+        options=job_options,
+        index=default_index
+    )
+    job_id = int(selected_job.split(" - ")[0])
+    
+    # Clear the job_to_match after using it
+    st.session_state.job_to_match = None
+    
+    # Show job details
+    job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    
+    if job:
+        with st.expander("Job Details", expanded=False):
+            st.subheader(job["title"])
+            st.write("**Description:**")
+            st.write(job["description"])
+            
+            # Display required skills
+            st.write("**Required Skills:**")
+            if job["required_skills"]:
+                skills = job["required_skills"]
+                if isinstance(skills, str):
+                    try:
+                        skills = json.loads(skills)
+                    except:
+                        skills = []
+                st.write(", ".join(skills) if skills else "None specified")
+            else:
+                st.write("None specified")
+            
+            # Display required experience
+            st.write("**Required Experience:**")
+            st.write(job["required_experience"] if job["required_experience"] else "Not specified")
+            
+            # Display required education
+            st.write("**Required Education:**")
+            st.write(job["required_education"] if job["required_education"] else "Not specified")
+    
+    # Run the matching algorithm
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("Run Matching Algorithm"):
+            with st.spinner("Matching candidates to job..."):
+                create_matches(job_id)
+                # After creating matches, refresh the page to show results
+                st.rerun()
+    
+    # Check if we have matches for this job
+    matches = get_matches(job_id)
+    
+    if matches:
+        # Display matches
+        st.subheader("Match Results")
         
-        # Load jobs
-        jobs = load_job_descriptions()
+        # Show total number of candidates matched
+        st.write(f"Found {len(matches)} candidate matches")
         
-        if not jobs:
-            st.warning("No job descriptions loaded. Please go to the Jobs page first.")
-            return
+        # Show the number of auto-shortlisted candidates
+        auto_shortlisted = sum(1 for match in matches if match["is_shortlisted"])
+        if auto_shortlisted > 0:
+            st.info(f"{auto_shortlisted} candidates were automatically shortlisted (score > 59%).")
         
-        # Display job selection
-        job_id = st.selectbox(
-            "Select a job to match with candidates",
-            options=[job["id"] for job in jobs],
-            format_func=lambda x: next((job["title"] for job in jobs if job["id"] == x), f"Job {x}")
-        )
+        # Create tabs for all matches and shortlisted
+        tab1, tab2 = st.tabs(["All Candidates", "Shortlisted"])
         
-        if st.button("Start Matching"):
-            st.session_state.job_to_match = job_id
-            st.rerun()
+        with tab1:
+            # All candidates table
+            match_data = []
+            for match in matches:
+                # Get candidate
+                candidate = conn.execute("SELECT name FROM candidates WHERE id = ?", 
+                                        (match["candidate_id"],)).fetchone()
+                match_data.append({
+                    "ID": match["id"],
+                    "Candidate": candidate["name"],
+                    "Match Score": f"{match['match_score']:.1f}%",
+                    "Skills": f"{match['skills_score']:.1f}%",
+                    "Experience": f"{match['experience_score']:.1f}%",
+                    "Education": f"{match['education_score']:.1f}%",
+                    "Shortlisted": "✓" if match["is_shortlisted"] else "✗"
+                })
+            
+            # Create DataFrame
+            df = pd.DataFrame(match_data)
+            
+            # Display table with formatting
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Add checkboxes to shortlist/un-shortlist
+            st.subheader("Update Shortlist Status")
+            
+            cols = st.columns(3)
+            with cols[0]:
+                match_id = st.number_input("Match ID", min_value=1, step=1)
+            with cols[1]:
+                is_shortlisted = st.checkbox("Shortlisted")
+            with cols[2]:
+                if st.button("Update"):
+                    update_shortlist(match_id, is_shortlisted)
+                    st.success(f"Updated match {match_id}")
+                    # Rerun to refresh
+                    st.rerun()
+        
+        with tab2:
+            # Get shortlisted candidates
+            shortlisted = get_shortlisted(job_id)
+            
+            if shortlisted:
+                shortlisted_data = []
+                for match in shortlisted:
+                    # Get candidate
+                    candidate = conn.execute("SELECT name FROM candidates WHERE id = ?", 
+                                           (match["candidate_id"],)).fetchone()
+                    shortlisted_data.append({
+                        "ID": match["id"],
+                        "Candidate": candidate["name"],
+                        "Match Score": f"{match['match_score']:.1f}%",
+                        "Skills": f"{match['skills_score']:.1f}%",
+                        "Experience": f"{match['experience_score']:.1f}%",
+                        "Education": f"{match['education_score']:.1f}%"
+                    })
+                
+                # Create DataFrame
+                df_shortlisted = pd.DataFrame(shortlisted_data)
+                
+                # Display table
+                st.dataframe(df_shortlisted, use_container_width=True, hide_index=True)
+                
+                # Navigate to interviews
+                if st.button("Schedule Interviews"):
+                    # Set the job ID for interview scheduling
+                    st.session_state.scheduling_job_id = job_id
+                    st.session_state.page = "interviews"
+                    st.rerun()
+            else:
+                st.info("No candidates have been shortlisted yet.")
+    
+    # Clear match button
+    if matches and st.button("Clear Matches"):
+        conn.execute("DELETE FROM matches WHERE job_id = ?", (job_id,))
+        conn.commit()
+        st.success("Matches cleared")
+        st.rerun()
+    
+    conn.close()
 
 def render_interviews_page():
     """Render the interviews page."""
@@ -1578,6 +1745,16 @@ def render_interviews_page():
         
         st.subheader(f"Schedule Interviews for: {job_title}")
         
+        # Fetch candidate names for display
+        conn = get_db_connection()
+        for match in shortlisted:
+            candidate = conn.execute(
+                "SELECT name FROM candidates WHERE id = ?", 
+                (match["candidate_id"],)
+            ).fetchone()
+            match["candidate_name"] = candidate["name"] if candidate else f"Candidate {match['candidate_id']}"
+        conn.close()
+        
         # Create interview scheduling form
         with st.form("interview_form"):
             st.write("### Interview Details")
@@ -1586,7 +1763,7 @@ def render_interviews_page():
             candidates = st.multiselect(
                 "Select candidates to interview",
                 options=[match["id"] for match in shortlisted],
-                format_func=lambda x: next((f"{match['candidate_name']} ({match['match_score']:.0%})" 
+                format_func=lambda x: next((f"{match['candidate_name']} ({match['match_score']:.1f}%)" 
                                           for match in shortlisted if match["id"] == x), f"Match {x}")
             )
             
@@ -1670,7 +1847,7 @@ def render_interviews_page():
                 } for interview in interviews
             ])
             
-            st.dataframe(interview_df, use_container_width=True)
+            st.dataframe(interview_df, use_container_width=True, hide_index=True)
             
             # Select an interview to view email
             interview_id = st.selectbox(
@@ -1686,15 +1863,22 @@ def render_interviews_page():
                 
                 if email:
                     st.subheader("Interview Invitation Email")
-                    st.text_area("Email Content", email, height=300)
+                    st.text_area("Email Content", email, height=300, key="email-content")
                     
-                    # Add email copy button (markdown doesn't do anything but is informative)
-                    st.markdown("Use the email above to invite the candidate.")
+                    # Add copy button for the email content
+                    st.markdown("""
+                    <div>
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('root').querySelector('textarea').value)">
+                            Copy Email
+                        </button>
+                    </div>
+                    """, unsafe_allow_html=True)
         else:
             st.info("No interviews scheduled yet")
             
             # Go to scheduling
             if st.button("Schedule New Interviews"):
+                # Redirect to matching page
                 st.session_state.page = "matching"
                 st.rerun()
 

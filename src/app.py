@@ -6,8 +6,8 @@ import streamlit as st
 
 # Configure the page - This must be the first Streamlit command
 st.set_page_config(
-    page_title="Matchwise - AI Job Screening",
-    page_icon="⚡",
+    page_title="Matchwise",
+    page_icon="✓",
     layout="wide"
 )
 
