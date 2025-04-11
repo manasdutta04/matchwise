@@ -8,10 +8,37 @@ import os
 import sys
 import subprocess
 import importlib.util
+import re
 
 def check_dependency(package_name):
     """Check if a Python package is installed."""
     return importlib.util.find_spec(package_name) is not None
+
+def check_streamlit_config():
+    """Check if Streamlit configuration is set up properly."""
+    # Path to the application files
+    app_path = os.path.join("src", "app.py")
+    matchwise_app_path = os.path.join("src", "matchwise_app.py")
+    
+    if not os.path.exists(app_path) or not os.path.exists(matchwise_app_path):
+        return True  # Skip check if files don't exist
+    
+    # Count set_page_config calls
+    count = 0
+    
+    # Check app.py
+    with open(app_path, 'r') as f:
+        app_content = f.read()
+        if 'set_page_config' in app_content:
+            count += 1
+    
+    # Check matchwise_app.py
+    with open(matchwise_app_path, 'r') as f:
+        matchwise_content = f.read()
+        if 'set_page_config' in matchwise_content:
+            count += 1
+    
+    return count == 1  # Should have exactly one set_page_config call
 
 def main():
     """
@@ -30,6 +57,15 @@ def main():
         print("\nPlease install the missing dependencies with:")
         print(f"pip install {' '.join(missing_deps)}")
         sys.exit(1)
+    
+    # Check Streamlit config
+    if not check_streamlit_config():
+        print("Warning: Multiple st.set_page_config() calls detected in the codebase.")
+        print("This may cause errors when running the application.")
+        print("Ensure only one file (typically app.py) calls set_page_config() and it's the first Streamlit command.")
+        response = input("Continue anyway? (y/n): ")
+        if response.lower() != 'y':
+            sys.exit(1)
     
     print("\n" + "="*60)
     print("Starting Matchwise Job Application Screening System...")
