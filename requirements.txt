@@ -26,6 +26,7 @@ numpy==1.26.3
 
 # For web interface
 streamlit>=1.26.0
+plotly>=5.15.0
 
 # For testing
 pytest==7.4.3
