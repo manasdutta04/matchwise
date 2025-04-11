@@ -15,6 +15,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List, Any, Optional
 
+# Constants
+DEFAULT_API_URL = "http://localhost:8000"
+API_URL = os.environ.get("STREAMLIT_API_URL", DEFAULT_API_URL)
+
 # Set page configuration
 st.set_page_config(
     page_title="Matchwise - AI Job Application Screening",
@@ -23,19 +27,36 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Constants
-API_URL = "http://localhost:8000/api"  # URL of the FastAPI server
-
+# Apply a custom theme
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    h1, h2, h3 {
+        color: #1E88E5;
+    }
+    .stButton>button {
+        background-color: #1E88E5;
+        color: white;
+    }
+    .stProgress .st-bo {
+        background-color: #1E88E5;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Helper functions
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_job_descriptions() -> List[Dict[str, Any]]:
     """Load job descriptions from the API."""
     try:
-        response = requests.get(f"{API_URL}/jobs")
+        response = requests.get(f"{API_URL}/api/jobs")
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error loading job descriptions: {response.text}")
+            st.error(f"Error loading job descriptions: {response.status_code}")
             return []
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -45,11 +66,11 @@ def load_job_descriptions() -> List[Dict[str, Any]]:
 def load_candidates() -> List[Dict[str, Any]]:
     """Load candidates from the API."""
     try:
-        response = requests.get(f"{API_URL}/candidates")
+        response = requests.get(f"{API_URL}/api/candidates")
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error loading candidates: {response.text}")
+            st.error(f"Error loading candidates: {response.status_code}")
             return []
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -60,13 +81,13 @@ def load_matches(job_id: int, shortlisted_only: bool = False) -> List[Dict[str, 
     """Load matches for a specific job."""
     try:
         response = requests.get(
-            f"{API_URL}/matches/{job_id}",
+            f"{API_URL}/api/matches/{job_id}",
             params={"shortlisted_only": shortlisted_only}
         )
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error loading matches: {response.text}")
+            st.error(f"Error loading matches: {response.status_code}")
             return []
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -77,13 +98,13 @@ def create_job(title: str, description: str) -> Optional[Dict[str, Any]]:
     """Create a new job description."""
     try:
         response = requests.post(
-            f"{API_URL}/jobs",
+            f"{API_URL}/api/jobs",
             json={"title": title, "description": description}
         )
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error creating job: {response.text}")
+            st.error(f"Error creating job: {response.status_code}")
             return None
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -94,11 +115,11 @@ def upload_cv(file) -> Optional[Dict[str, Any]]:
     """Upload a CV file."""
     try:
         files = {"file": (file.name, file, "application/pdf")}
-        response = requests.post(f"{API_URL}/candidates", files=files)
+        response = requests.post(f"{API_URL}/api/candidates", files=files)
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error uploading CV: {response.text}")
+            st.error(f"Error uploading CV: {response.status_code}")
             return None
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -112,11 +133,11 @@ def create_matches(job_id: int, candidate_ids: List[int] = None) -> List[Dict[st
         if candidate_ids:
             params["candidate_ids"] = candidate_ids
         
-        response = requests.post(f"{API_URL}/matches/{job_id}", params=params)
+        response = requests.post(f"{API_URL}/api/matches/{job_id}", params=params)
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error creating matches: {response.text}")
+            st.error(f"Error creating matches: {response.status_code}")
             return []
     except Exception as e:
         st.error(f"Error connecting to API: {e}")
@@ -131,11 +152,11 @@ def schedule_interview(match_id: int, interview_date, interview_slots, interview
             "interview_slots": interview_slots,
             "interview_formats": interview_formats
         }
-        response = requests.post(f"{API_URL}/interviews/{match_id}", json=data)
+        response = requests.post(f"{API_URL}/api/interviews/{match_id}", json=data)
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Error scheduling interview: {response.text}")
+            st.error(f"Error scheduling interview: {response.status_code}")
             return None
     except Exception as e:
         st.error(f"Error connecting to API: {e}")

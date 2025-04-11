@@ -5,8 +5,10 @@ Initializes the database and starts the FastAPI server.
 
 import os
 import logging
-from fastapi import FastAPI
+import datetime
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 import uvicorn
 
 # Import database utilities
@@ -24,6 +26,31 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Environment variables
+SECRET_KEY = os.environ.get("SECRET_KEY", "development_secret_key")
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+# Configure CORS origins based on environment
+if ENVIRONMENT == "production":
+    # In production, only allow your Streamlit app domain
+    allowed_origins = [
+        os.environ.get("STREAMLIT_URL", "https://your-app.streamlit.app"),
+    ]
+    # You can add more allowed origins as needed:
+    # If additional origins are specified in environment variables
+    additional_origins = os.environ.get("ADDITIONAL_CORS_ORIGINS", "")
+    if additional_origins:
+        allowed_origins.extend(additional_origins.split(","))
+else:
+    # In development, allow all local origins
+    allowed_origins = [
+        "http://localhost:8501",  # Default Streamlit port
+        "http://localhost:3000",  # For potential React frontend
+        "http://127.0.0.1:8501",
+    ]
+
 # Create FastAPI application
 app = FastAPI(
     title="Matchwise API",
@@ -34,7 +61,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change this in production to specific origins
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,13 +70,24 @@ app.add_middleware(
 # Include API routes - commented until fixed
 # app.include_router(router, prefix="/api")
 
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring."""
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.datetime.now().isoformat(),
+        "environment": ENVIRONMENT
+    }
+
 # Root endpoint
 @app.get("/")
 async def root():
     return {
         "message": "Welcome to Matchwise API",
         "description": "AI-Powered Job Application Screening System",
-        "documentation": "/docs"
+        "documentation": "/docs",
+        "health_check": "/health"
     }
 
 
@@ -70,11 +108,14 @@ def main():
     else:
         module_path = "src.main:app"
     
+    # Get port from environment variable or use default
+    port = int(os.environ.get("PORT", 8000))
+    
     uvicorn.run(
         module_path,
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=ENVIRONMENT == "development",  # Only reload in development
         log_level="info"
     )
 

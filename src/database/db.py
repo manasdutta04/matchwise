@@ -1,6 +1,6 @@
 """
 Database initialization and connection management.
-This module handles SQLite database setup and connection management.
+Modified to support serverless environments like Vercel.
 """
 
 import os
@@ -10,13 +10,28 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import Session
 
-# Database file path
-DATABASE_URL = "sqlite:///matchwise.db"
-ASYNC_DATABASE_URL = "sqlite+aiosqlite:///matchwise.db"
+# Environment check
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+IS_VERCEL = os.environ.get("VERCEL", "0") == "1"
+
+# Database URLs - with dynamic paths for serverless environments
+if IS_VERCEL:
+    # For Vercel, use /tmp directory which is writable
+    DB_PATH = "/tmp/matchwise.db"
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
+    ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+else:
+    # For normal environments, use project directory
+    DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///matchwise.db")
+    ASYNC_DATABASE_URL = os.environ.get("DATABASE_ASYNC_URL", "sqlite+aiosqlite:///matchwise.db")
 
 # Create engine for synchronous operations
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False},
+    # Add connection pooling for better performance in production
+    pool_size=5 if ENVIRONMENT == "production" else None,
+    max_overflow=10 if ENVIRONMENT == "production" else None
 )
 
 # Create engine for asynchronous operations - comment this out if aiosqlite is not installed
@@ -67,7 +82,7 @@ async def get_async_db():
 def init_db():
     """Initialize the database."""
     create_tables()
-    print("Database initialized successfully.")
+    print(f"Database initialized successfully at {DATABASE_URL}")
 
 
 if __name__ == "__main__":
