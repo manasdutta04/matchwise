@@ -1058,7 +1058,7 @@ def main():
     
     # Footer
     st.divider()
-    st.caption("© 2023 Matchwise. AI-Powered Job Screening System.")
+    st.caption("© 2025 Matchwise | A craft of Manas Dutta")
 
 def render_jobs_page():
     """Render the jobs page."""
