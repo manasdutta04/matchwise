@@ -1,24 +1,22 @@
-# Matchwise
+# Matchwise - AI Job Application Screening System
 
-Matchwise is an intelligent matching system designed to connect users based on preferences, interests, and compatibility factors. The system leverages advanced machine learning algorithms and natural language processing to create optimal matches.
+Matchwise is an AI-powered job application screening system designed to connect job candidates with the right positions based on skills, experience, and education match.
 
 ## Features
 
-- **Smart Matching Algorithm**: Uses ML models to find the best matches based on multiple criteria
-- **Profile Management**: Create and manage detailed user profiles
-- **Preference Settings**: Configure matching preferences and criteria
+- **Smart Matching Algorithm**: Uses AI to match candidates to jobs based on multiple criteria
+- **Profile Management**: View and manage job descriptions and candidate CVs 
 - **Match Scoring**: Transparent scoring system to explain matching rationale
-- **API Integration**: RESTful API for integration with other systems
+- **Interview Scheduling**: Schedule interviews with shortlisted candidates
+- **Email Templates**: Generate professional interview invitation emails
 
 ## Tech Stack
 
-- **Backend**: FastAPI, Python 3.10+
-- **Database**: PostgreSQL (with SQLAlchemy ORM)
-- **AI/ML**: LangChain, scikit-learn, sentence-transformers
-- **Authentication**: JWT with Python-jose
-- **Testing**: Pytest with coverage reporting
-- **Documentation**: OpenAPI (Swagger)
-- **API Client**: HTTPX for async HTTP requests
+- **Backend**: SQLite (with Python SQLite3)
+- **Frontend**: Streamlit for a clean, minimal UI
+- **AI/ML**: Simulated AI for text analysis and matching
+- **Data Processing**: Pandas and NumPy for data operations
+- **Text Processing**: Regular expressions for CV and job description parsing
 
 ## Installation
 
@@ -28,144 +26,99 @@ Matchwise is an intelligent matching system designed to connect users based on p
    cd matchwise
    ```
 
-2. Create and activate a virtual environment:
+2. Set up a virtual environment (recommended):
    ```bash
+   # Windows
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   venv\Scripts\activate
+   
+   # macOS/Linux
+   python -m venv venv
+   source venv/bin/activate
    ```
 
-3. Install dependencies:
+3. Install the minimal required dependencies:
    ```bash
-   pip install -r requirements.txt
+   pip install streamlit pandas numpy PyPDF2
    ```
 
-4. Create a `.env` file in the project root with the following variables:
+## Usage
+
+Run the application using the provided script:
+```bash
+python run_app.py
+```
+
+Alternatively, you can run the Streamlit app directly:
+```bash
+cd src
+streamlit run app.py
+```
+
+The application will be accessible at http://localhost:8501 in your browser.
+
+## Initial Setup
+
+On first run, the application will:
+1. Create a `data` directory for the SQLite database
+2. Initialize database tables for jobs, candidates, matches, and interviews
+3. Simulate job descriptions and candidate CVs for demo purposes
+
+## Workflow
+
+1. **Jobs Tab**: Browse and manage job descriptions
+   - View job details including required skills, experience, and education
+   - Add new job descriptions
+
+2. **Candidates Tab**: Browse and manage candidate CVs
+   - View candidate details including extracted skills, experience, and education
+   - Upload new candidate CVs
+
+3. **Matching Tab**: Match candidates to jobs
+   - View match scores based on skills, experience, and education
+   - Shortlist promising candidates for interviews
+
+4. **Interviews Tab**: Schedule and manage interviews
+   - Schedule interviews with shortlisted candidates
+   - Generate and copy interview invitation emails
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. **Missing dependencies**: Ensure you've installed all required packages
+   ```bash
+   pip install streamlit pandas numpy PyPDF2
    ```
-   DATABASE_URL=postgresql://user:password@localhost/matchwise
-   SECRET_KEY=your_secret_key
-   ENVIRONMENT=development
+
+2. **Database errors**: If the database is corrupted, delete the `data/matchwise.db` file and restart
+   ```bash
+   rm src/data/matchwise.db  # or delete manually
    ```
+
+3. **Port in use**: If port 8501 is already in use, Streamlit will automatically use another port
+
+4. **Streamlit configuration errors**: If you get a `StreamlitSetPageConfigMustBeFirstCommandError`, ensure that:
+   - Only one file calls `st.set_page_config()`
+   - The `set_page_config()` call is the first Streamlit command in the file
+   - No other Streamlit imports or functions are called before it
 
 ## Project Structure
 
 ```
 matchwise/
-├── app/                  # Application code
-│   ├── api/              # API endpoints
-│   ├── core/             # Core functionality and config
-│   ├── db/               # Database models and utils
-│   ├── matching/         # Matching algorithms
-│   ├── schemas/          # Pydantic models
-│   └── services/         # Business logic services
-├── tests/                # Test suite
-├── alembic/              # Database migrations
-├── .env                  # Environment variables (not tracked by git)
-├── .gitignore            # Git ignore rules
-├── requirements.txt      # Project dependencies
-└── README.md             # Project documentation
+├── src/               # Source code
+│   ├── app.py         # Main Streamlit entry point
+│   ├── matchwise_app.py # Core application logic
+│   ├── data/          # SQLite database
+│   ├── database/      # Database models and utilities
+│   ├── agents/        # AI agent implementations
+│   ├── models/        # Matching models and algorithms
+│   └── utils/         # Utility functions
+├── run_app.py         # Convenience script to run the app
+└── requirements.txt   # Project dependencies
 ```
-
-## Usage (Local Development)
-
-1. Start the FastAPI backend:
-   ```bash
-   python run.py
-   ```
-
-2. Start the Streamlit frontend:
-   ```bash
-   streamlit run src/app.py
-   ```
-
-3. Access the applications:
-   - API: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-   - Web Interface: http://localhost:8501
-
-## Deployment
-
-### Option 1: Docker Deployment
-
-1. Build and run using Docker Compose:
-   ```bash
-   docker-compose up --build
-   ```
-
-2. Access the applications:
-   - API: http://localhost:8000
-   - Web Interface: http://localhost:8501
-
-### Option 2: Heroku Deployment
-
-1. Create Heroku apps for backend and frontend:
-   ```bash
-   # For API
-   heroku create matchwise-api
-   
-   # For Streamlit
-   heroku create matchwise-web
-   ```
-
-2. Deploy the API:
-   ```bash
-   # Set environment variables
-   heroku config:set APP_TYPE=api -a matchwise-api
-   
-   # Deploy
-   git push https://git.heroku.com/matchwise-api.git main
-   ```
-
-3. Deploy the Streamlit interface:
-   ```bash
-   # Set environment variables
-   heroku config:set APP_TYPE=streamlit -a matchwise-web
-   heroku config:set STREAMLIT_API_URL=https://matchwise-api.herokuapp.com -a matchwise-web
-   
-   # Deploy
-   git push https://git.heroku.com/matchwise-web.git main
-   ```
-
-### Option 3: Cloud Platform Deployment
-
-Follow the documentation for your preferred cloud platform:
-- [AWS Elastic Beanstalk Deployment Guide](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/create-deploy-python-apps.html)
-- [Google Cloud Run Guide](https://cloud.google.com/run/docs/quickstarts/build-and-deploy/deploy-python-service)
-- [Azure App Service Guide](https://learn.microsoft.com/en-us/azure/app-service/quickstart-python)
-
-## Development
-
-### Database Migrations
-
-```bash
-# Generate a new migration
-alembic revision --autogenerate -m "Description of changes"
-
-# Run migrations
-alembic upgrade head
-```
-
-### Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run tests with coverage report
-pytest --cov=app
-```
-
-## Developer
-
-[Manas Dutta](https://github.com/manasdutta04)
 
 ## License
 
-[MIT License](LICENSE)
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request 
+[MIT License](LICENSE) 
